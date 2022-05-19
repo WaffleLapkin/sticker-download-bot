@@ -11,19 +11,17 @@ mod download;
 mod error;
 mod query_command;
 
-use std::{collections::VecDeque, io::Write, iter::Peekable, pin::Pin, task, time::Duration};
+use std::{collections::VecDeque, io::Write, pin::Pin, task};
 
 use bytes::Bytes;
 use emojis::Emoji;
 use futures::{stream, StreamExt, TryStreamExt};
 use teloxide::{
     adaptors::{DefaultParseMode, Throttle},
-    dispatching::{update_listeners::polling, HandlerExt, MessageFilterExt, UpdateHandler},
-    dptree::{self, deps, Handler},
-    payloads::{AnswerCallbackQuerySetters, EditMessageTextSetters, SendMessageSetters},
+    dispatching::{update_listeners::polling, MessageFilterExt, UpdateHandler},
+    dptree::{self, deps},
     prelude::{AutoSend, Dispatcher, RequesterExt},
-    respond,
-    types::{CallbackQuery, ChatAction::UploadDocument, InlineQuery, InputFile, ParseMode, Update},
+    types::{CallbackQuery, ChatAction::UploadDocument, InputFile, ParseMode, Update},
     utils::command::parse_command,
     RequestError,
 };
@@ -101,7 +99,7 @@ fn dispatch_tree() -> UpdateHandler<RequestError> {
         .branch(Update::filter_callback_query().endpoint(callback_query))
 }
 
-async fn sticker(bot: Bot, sticker: Sticker, message: Message) -> Result<(), RequestError> {
+async fn sticker(bot: Bot, message: Message) -> Result<(), RequestError> {
     let download_png = InlineKeyboardButton::callback(
         "Download sticker as .png",
         QueryCommand::download(DownloadTarget::Single, DownloadFormat::Png).encode(),

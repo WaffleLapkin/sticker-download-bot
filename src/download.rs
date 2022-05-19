@@ -1,26 +1,15 @@
 use std::{
     collections::HashSet,
-    future::Future,
-    path::PathBuf,
     pin::Pin,
     sync::{Arc, Mutex},
     task::Poll,
-    time::Instant,
 };
 
 use bytes::Bytes;
-use emojis::Emoji;
 use futures::{stream, Stream, StreamExt, TryStreamExt};
-use teloxide::{
-    net::Download,
-    prelude::Requester,
-    types::{ChatId, Sticker},
-};
-use tokio::io::AsyncWriteExt;
-use unicode_segmentation::UnicodeSegmentation;
-use uuid::Uuid;
+use teloxide::net::Download;
 
-use crate::query_command::{DownloadFormat, DownloadTarget};
+use crate::query_command::DownloadFormat;
 
 #[derive(Clone)]
 pub struct Downloader {
@@ -32,8 +21,6 @@ pub struct AlreadyDownloading;
 
 pub struct Tasks {
     pub message_id: i32,
-    //pub chat_id: ChatId,
-    //pub target: DownloadTarget,
     pub format: DownloadFormat,
     pub stickers: Vec<Task>,
 }
