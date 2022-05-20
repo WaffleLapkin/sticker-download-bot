@@ -228,8 +228,13 @@ async fn callback_query_download(
     };
 
     let sticker = match reply.sticker() {
-        Some(s) => s,
+        // FIXME: ideally we would simply either
+        //        A) support animated/video stickers
+        //        B) answer w/ error when the sticker is sent, not when the button is pressed
+        Some(s) if s.is_animated => return err::animated_sticker_not_supported(),
+        Some(s) if s.is_video => return err::video_sticker_not_supported(),
         None => return err::reply_is_not_sticker(),
+        Some(s) => s,
     };
 
     bot.edit_message_text(message.chat.id, message.id, "Queueing download request...")
