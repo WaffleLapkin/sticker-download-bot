@@ -1,3 +1,5 @@
+use std::{fmt::Debug, panic::Location};
+
 use teloxide::RequestError;
 
 pub enum Error<E> {
@@ -67,5 +69,38 @@ pub mod callback_query {
 
     pub fn video_sticker_not_supported() -> Result<(), Error<CallbackQueryError>> {
         Err(Error::Show(CallbackQueryError::VideoStickerNotSupported))
+    }
+}
+
+pub mod downloading {
+    use teloxide::RequestError;
+
+    pub struct SendDocumentError(pub RequestError);
+}
+
+pub trait ResultExt {
+    type Item;
+    type Err;
+
+    fn fine(self)
+    where
+        Self::Err: Debug;
+}
+
+impl<T, E> ResultExt for Result<T, E> {
+    type Item = T;
+
+    type Err = E;
+
+    #[track_caller]
+    fn fine(self)
+    where
+        <Self as ResultExt>::Err: Debug,
+    {
+        let loc = Location::caller();
+
+        if let Err(err) = self {
+            log::error!("Ignoring error @ {loc}: {err:?}");
+        }
     }
 }

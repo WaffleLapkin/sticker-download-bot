@@ -4,7 +4,7 @@
 // - Converting to .png is NOT implemented
 // - Messages/interface are very much work in progress
 // - Progress is not shown
-// - The code is quite bad in some places/32 warnings/wip
+// - The code is quite bad in some places/wip
 // - Sticker pack information is not provided (archive should include .json)
 
 mod download;
@@ -37,7 +37,7 @@ use zip::{write::FileOptions, ZipWriter};
 
 use crate::{
     download::{AlreadyDownloading, Downloader, Task, Tasks},
-    error::{callback_query::CallbackQueryError, Error},
+    error::{callback_query::CallbackQueryError, Error, ResultExt},
     query_command::{ActionDownload, DownloadFormat, DownloadTarget, QueryAction, QueryCommand},
 };
 
@@ -250,50 +250,78 @@ async fn callback_query_download(
             let chat_id = message.chat.id;
             let message_id = message.id;
             tokio::spawn(async move {
-                let res: Result<Vec<_>, _> = stream
-                    .map(|(file_name, res)| res.map(|v| (file_name, v)))
-                    .try_collect()
-                    .await;
+                use error::downloading::SendDocumentError;
 
-                // FIXME: handle errors
+                let fut = async {
+                    let res: Result<Vec<_>, _> = stream
+                        .map(|(file_name, res)| res.map(|v| (file_name, v)))
+                        .try_collect()
+                        .await;
 
-                match res {
-                    Ok(mut stickers) if stickers.len() == 1 => {
-                        let (name, bytes) = stickers.pop().unwrap();
-                        let file = InputFile::read(chunked_read(bytes)).file_name(name); // FIXME: should be something like chunked()
-                        bot.send_document(chat_id, file).await;
-                        bot.delete_message(chat_id, message_id).await;
-                    }
-                    Ok(stickers) => {
-                        bot.send_chat_action(chat_id, UploadDocument).await;
+                    match res {
+                        Ok(mut stickers) if stickers.len() == 1 => {
+                            let (name, bytes) = stickers.pop().unwrap();
+                            let file = InputFile::read(chunked_read(bytes)).file_name(name); // FIXME: should be something like chunked()
+                            bot.send_document(chat_id, file)
+                                .await
+                                .map_err(SendDocumentError)?;
+                            bot.delete_message(chat_id, message_id).await.fine();
+                        }
+                        Ok(stickers) => {
+                            bot.send_chat_action(chat_id, UploadDocument).await.fine();
 
-                        // FIXME: is this spawn_blocking needed? can we stream the zip?
-                        let zip = spawn_blocking(|| {
-                            let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::with_capacity(
-                                0, /* FIXME */
-                            )));
+                            // FIXME: is this spawn_blocking needed? can we stream the zip?
+                            let zip = spawn_blocking(|| {
+                                let mut zip = ZipWriter::new(std::io::Cursor::new(
+                                    Vec::with_capacity(0 /* FIXME */),
+                                ));
 
-                            for (name, bytes) in stickers {
-                                zip.start_file(name, FileOptions::default() /* FIXME */);
-                                for b in bytes {
-                                    zip.write_all(&b);
+                                for (name, bytes) in stickers {
+                                    zip.start_file(name, FileOptions::default() /* FIXME */)?;
+                                    for b in bytes {
+                                        zip.write_all(&b)?;
+                                    }
                                 }
-                            }
 
-                            zip.finish().unwrap().into_inner()
-                        })
-                        .await
-                        .unwrap();
+                                zip.finish().map(std::io::Cursor::into_inner)
+                            })
+                            .await;
 
-                        let archive_name =
-                            format!("{}.zip", sticker_set_name.as_deref().unwrap_or("stickers"));
-                        let file = InputFile::memory(zip).file_name(archive_name);
-                        bot.send_document(chat_id, file).await;
-                        bot.delete_message(chat_id, message_id).await;
+                            let zip = match zip {
+                                Ok(Ok(z)) => z,
+                                _ => return Ok(()), // FIXME
+                            };
+
+                            let archive_name = format!(
+                                "{}.zip",
+                                sticker_set_name.as_deref().unwrap_or("stickers")
+                            );
+                            let file = InputFile::memory(zip).file_name(archive_name);
+
+                            bot.send_document(chat_id, file)
+                                .await
+                                .map_err(SendDocumentError)?;
+                            bot.delete_message(chat_id, message_id).await.fine();
+                        }
+                        Err(err) => {
+                            let text = format!("An error happened while downloading sticker(s): <code>{err}</code> :(\n\nTry again later."); // FIXME: determine (s)
+                            bot.edit_message_text(chat_id, message_id, text)
+                                .await
+                                .fine();
+                        }
                     }
-                    Err(err) => {
-                        let text = format!("An error happened while downloading sticker(s): <code>{err}</code> :(\n\nTry again later."); // FIXME: determine (s)
-                        bot.edit_message_text(chat_id, message_id, text).await;
+
+                    Ok(())
+                };
+                match fut.await {
+                    Ok(()) => {}
+                    Err(SendDocumentError(e)) => {
+                        let text =
+                            format!("Error: Couldn't send the document: {e}.\n Try again later.");
+
+                        bot.edit_message_text(chat_id, message_id, text)
+                            .await
+                            .fine()
                     }
                 }
             });

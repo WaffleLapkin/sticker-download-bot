@@ -1258,6 +1258,7 @@ dependencies = [
  "bytes",
  "emojis",
  "futures",
+ "log",
  "pin-project",
  "pretty_env_logger",
  "teloxide",
