@@ -83,7 +83,7 @@ impl Tasks {
 
 /// How many files should be downloaded concurrently at a time.
 ///
-/// I've ""benched"" the download code by hand using `Instent::now()`/`.elapsed()`
+/// I've ""benched"" the download code by hand using `Instant::now()`/`.elapsed()`
 /// running with each `C` 3 times on the same 120-sticker sticker pack.
 ///
 /// After `C = 8` the change in speed is quite small, so I've decided to keep `C = 8`.
