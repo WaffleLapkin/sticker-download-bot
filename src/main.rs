@@ -278,8 +278,7 @@ async fn callback_query_download(
                     // FIXME: track compression progress?
                     if res.is_ok() {
                         // FIXME: fix the message when downloading a single sticker
-                        // FIXME: probably should wait to definitely update the message
-                        progress.title("Uploading sticker set");
+                        progress.title_imp("Uploading sticker set");
                     }
 
                     match res {

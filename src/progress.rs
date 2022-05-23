@@ -36,9 +36,15 @@ impl Progress {
         }
     }
 
+    #[allow(dead_code)]
     pub fn title(&mut self, title: &str) {
         self.title = title.to_owned();
         self.do_update(self.title.clone())
+    }
+
+    pub fn title_imp(&mut self, title: &str) {
+        self.title = title.to_owned();
+        self.do_update_imp(self.title.clone())
     }
 
     fn do_update(&mut self, to: String) {
@@ -58,6 +64,27 @@ impl Progress {
 
             tokio::spawn(async move { bot.edit_message_text(chat_id, message_id, to).await.fine() })
         });
+    }
+
+    fn do_update_imp(&mut self, to: String) {
+        let task = self.task.take();
+
+        let bot = self.bot.clone();
+        let &mut Self {
+            chat_id,
+            message_id,
+            ..
+        } = self;
+
+        let handle = tokio::spawn(async move {
+            if let Some(task) = task {
+                task.await.fine();
+            }
+
+            bot.edit_message_text(chat_id, message_id, to).await.fine()
+        });
+
+        self.task = Some(handle);
     }
 }
 
