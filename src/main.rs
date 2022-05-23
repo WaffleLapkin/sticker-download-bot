@@ -9,9 +9,10 @@
 
 mod download;
 mod error;
+mod progress;
 mod query_command;
 
-use std::{collections::VecDeque, io::Write, pin::Pin, task};
+use std::{collections::VecDeque, future::ready, io::Write, pin::Pin, task};
 
 use bytes::Bytes;
 use emojis::Emoji;
@@ -38,6 +39,7 @@ use zip::{write::FileOptions, ZipWriter};
 use crate::{
     download::{AlreadyDownloading, Downloader, Task, Tasks},
     error::{callback_query::CallbackQueryError, Error, ResultExt},
+    progress::Progress,
     query_command::{ActionDownload, DownloadFormat, DownloadTarget, QueryAction, QueryCommand},
 };
 
@@ -237,11 +239,16 @@ async fn callback_query_download(
         Some(s) => s,
     };
 
-    bot.edit_message_text(message.chat.id, message.id, "Queueing download request...")
-        .await?;
+    let mut progress = Progress::new(
+        &bot,
+        "Queueing download request...",
+        message.chat.id,
+        message.id,
+    );
 
     let sticker_set_name = sticker.set_name.clone();
-    let tasks = prepare_download_tasks(bot, message.id, sticker, action).await?;
+    let tasks = prepare_download_tasks(bot, message.id, sticker, action, &mut progress).await?;
+    let total_size = tasks.total_size();
     match d.download(tasks) {
         Ok(stream) => {
             bot.answer_callback_query(&query.id).await?;
@@ -253,13 +260,31 @@ async fn callback_query_download(
                 use error::downloading::SendDocumentError;
 
                 let fut = async {
-                    let res: Result<Vec<_>, _> = stream
+                    let mut scope = progress.scope("Downloading stickers", total_size as _);
+
+                    let mut stickers = Vec::new();
+                    let res = stream
                         .map(|(file_name, res)| res.map(|v| (file_name, v)))
-                        .try_collect()
-                        .await;
+                        .try_for_each(|file| {
+                            // FIXME: show KiB or something
+                            scope.inc_by(file.1.iter().map(|b| b.len() as u64).sum());
+                            stickers.push(file);
+
+                            ready(Ok(()))
+                        })
+                        .await
+                        .map(|()| stickers);
+
+                    // FIXME: track compression progress?
+                    if res.is_ok() {
+                        // FIXME: fix the message when downloading a single sticker
+                        // FIXME: probably should wait to definitely update the message
+                        progress.title("Uploading sticker set");
+                    }
 
                     match res {
                         Ok(mut stickers) if stickers.len() == 1 => {
+                            // FIXME: update progress here
                             let (name, bytes) = stickers.pop().unwrap();
                             let file = InputFile::read(chunked_read(bytes)).file_name(name); // FIXME: should be something like chunked()
                             bot.send_document(chat_id, file)
@@ -305,6 +330,8 @@ async fn callback_query_download(
                         }
                         Err(err) => {
                             let text = format!("An error happened while downloading sticker(s): <code>{err}</code> :(\n\nTry again later."); // FIXME: determine (s)
+
+                            // FIXME: use `progress`
                             bot.edit_message_text(chat_id, message_id, text)
                                 .await
                                 .fine();
@@ -348,6 +375,7 @@ async fn prepare_download_tasks(
     message_id: i32,
     sticker: &Sticker,
     ActionDownload { target, format }: ActionDownload,
+    progress: &mut Progress,
 ) -> Result<Tasks, Error<CallbackQueryError>> {
     let set = match &sticker.set_name {
         Some(name) => Some(bot.get_sticker_set(name).await?),
@@ -382,15 +410,25 @@ async fn prepare_download_tasks(
             .collect(),
     };
 
-    let stickers = stream::iter(named_and_identified)
+    let mut scope = progress.scope("Fetching sticker info", named_and_identified.len() as _);
+
+    let mut stickers = Vec::new();
+    stream::iter(named_and_identified)
         .map(|(name, file_id)| async {
             bot.get_file(file_id).await.map(|f| Task {
                 path: f.file_path,
                 name,
+                size: f.file_size as usize,
             })
         })
         .buffer_unordered(16 /* FIXME: choose constant */)
-        .try_collect()
+        //.try_collect()
+        .try_for_each(|task| {
+            stickers.push(task);
+            scope.inc();
+
+            ready(Ok(()))
+        })
         .await?;
 
     Ok(Tasks {

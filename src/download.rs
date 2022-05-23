@@ -28,6 +28,7 @@ pub struct Tasks {
 pub struct Task {
     pub path: String,
     pub name: String,
+    pub size: usize,
 }
 
 type Item = (
@@ -55,7 +56,7 @@ impl Downloader {
         let Self { bot, in_flight } = self.clone();
 
         let stream = stream::iter(t.stickers)
-            .map(move |Task { path, name }| {
+            .map(move |Task { path, name, .. }| {
                 let bot = bot.clone();
                 async move {
                     let file_name = format!("{name}.{ext}", ext = format.ext());
@@ -71,6 +72,12 @@ impl Downloader {
             in_flight.lock().unwrap().remove(&t.message_id);
         });
         Ok(stream)
+    }
+}
+
+impl Tasks {
+    pub(crate) fn total_size(&self) -> usize {
+        self.stickers.iter().map(|t| t.size).sum()
     }
 }
 
