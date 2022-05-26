@@ -300,8 +300,15 @@ async fn callback_query_download(
                                     Vec::with_capacity(0 /* FIXME */),
                                 ));
 
+                                let options = FileOptions::default()
+                                    // Compressing images is pointless because they are already compressed.
+                                    //
+                                    // From my non-exhaustive testing using default `deflate` compression
+                                    // makes archiving 29 times slower while making the resulting .zip a little bit bigger.
+                                    .compression_method(zip::CompressionMethod::Stored);
+
                                 for (name, bytes) in stickers {
-                                    zip.start_file(name, FileOptions::default() /* FIXME */)?;
+                                    zip.start_file(name, options)?;
                                     for b in bytes {
                                         zip.write_all(&b)?;
                                     }
