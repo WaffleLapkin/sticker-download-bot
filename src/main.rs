@@ -100,30 +100,28 @@ fn dispatch_tree() -> UpdateHandler<RequestError> {
 
 async fn sticker(bot: Bot, message: Message) -> Result<(), RequestError> {
     let download_png = InlineKeyboardButton::callback(
-        "Download sticker as .png",
+        "sticker as .png",
         QueryCommand::download(DownloadTarget::Single, DownloadFormat::Png).encode(),
     );
     let download_webp = InlineKeyboardButton::callback(
-        "Download sticker as .webp",
+        "sticker as .webp",
         QueryCommand::download(DownloadTarget::Single, DownloadFormat::Webp).encode(),
     );
     let download_png_set = InlineKeyboardButton::callback(
-        "Download set as .png",
+        "set as .png",
         QueryCommand::download(DownloadTarget::All, DownloadFormat::Png).encode(),
     );
     let download_webp_set = InlineKeyboardButton::callback(
-        "Download set as .webp",
+        "set as .webp",
         QueryCommand::download(DownloadTarget::All, DownloadFormat::Webp).encode(),
     );
 
     let kb = InlineKeyboardMarkup::new([
-        [download_png],
-        [download_webp],
-        [download_png_set],
-        [download_webp_set],
+        [download_png_set, download_webp_set],
+        [download_png, download_webp],
     ]);
 
-    bot.send_message(message.chat.id, "TODO")
+    bot.send_message(message.chat.id, "What do you want to download?")
         .reply_markup(kb)
         .reply_to_message_id(message.id)
         .await?;
