@@ -253,6 +253,7 @@ async fn callback_query_download(
             let bot = bot.clone();
             let chat_id = message.chat.id;
             let message_id = message.id;
+            let reply_message_id = reply.id;
             tokio::spawn(async move {
                 use error::downloading::SendDocumentError;
 
@@ -283,6 +284,7 @@ async fn callback_query_download(
                             let (name, bytes) = stickers.pop().unwrap();
                             let file = InputFile::read(chunked_read(bytes)).file_name(name); // FIXME: should be something like chunked()
                             bot.send_document(chat_id, file)
+                                .reply_to_message_id(reply_message_id)
                                 .await
                                 .map_err(SendDocumentError)?;
                             bot.delete_message(chat_id, message_id).await.fine();
@@ -301,6 +303,7 @@ async fn callback_query_download(
                             };
 
                             bot.send_document(chat_id, file)
+                                .reply_to_message_id(reply_message_id)
                                 .await
                                 .map_err(SendDocumentError)?;
                             bot.delete_message(chat_id, message_id).await.fine();
