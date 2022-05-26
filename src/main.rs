@@ -11,8 +11,9 @@ mod download;
 mod error;
 mod progress;
 mod query_command;
+mod stuff;
 
-use std::{collections::VecDeque, future::ready, io::Write, pin::Pin, task};
+use std::{collections::VecDeque, future::ready, pin::Pin, task};
 
 use bytes::Bytes;
 use emojis::Emoji;
@@ -32,15 +33,15 @@ use teloxide::{
     prelude::Requester,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me, Message, Sticker},
 };
-use tokio::{io::AsyncRead, task::spawn_blocking};
+use tokio::io::AsyncRead;
 use unicode_segmentation::UnicodeSegmentation;
-use zip::{write::FileOptions, ZipWriter};
 
 use crate::{
     download::{AlreadyDownloading, Downloader, Task, Tasks},
     error::{callback_query::CallbackQueryError, Error, ResultExt},
     progress::Progress,
     query_command::{ActionDownload, DownloadFormat, DownloadTarget, QueryAction, QueryCommand},
+    stuff::archive,
 };
 
 type Bot = AutoSend<DefaultParseMode<Throttle<teloxide::Bot>>>;
@@ -294,40 +295,15 @@ async fn callback_query_download(
                         Ok(stickers) => {
                             bot.send_chat_action(chat_id, UploadDocument).await.fine();
 
-                            // FIXME: is this spawn_blocking needed? can we stream the zip?
-                            let zip = spawn_blocking(|| {
-                                let mut zip = ZipWriter::new(std::io::Cursor::new(
-                                    Vec::with_capacity(0 /* FIXME */),
-                                ));
+                            let zip = archive(
+                                sticker_set_name.as_deref().unwrap_or("stickers"),
+                                stickers,
+                            );
 
-                                let options = FileOptions::default()
-                                    // Compressing images is pointless because they are already compressed.
-                                    //
-                                    // From my non-exhaustive testing using default `deflate` compression
-                                    // makes archiving 29 times slower while making the resulting .zip a little bit bigger.
-                                    .compression_method(zip::CompressionMethod::Stored);
-
-                                for (name, bytes) in stickers {
-                                    zip.start_file(name, options)?;
-                                    for b in bytes {
-                                        zip.write_all(&b)?;
-                                    }
-                                }
-
-                                zip.finish().map(std::io::Cursor::into_inner)
-                            })
-                            .await;
-
-                            let zip = match zip {
-                                Ok(Ok(z)) => z,
+                            let file = match zip {
+                                Ok(z) => z,
                                 _ => return Ok(()), // FIXME
                             };
-
-                            let archive_name = format!(
-                                "{}.zip",
-                                sticker_set_name.as_deref().unwrap_or("stickers")
-                            );
-                            let file = InputFile::memory(zip).file_name(archive_name);
 
                             bot.send_document(chat_id, file)
                                 .await
