@@ -13,10 +13,8 @@ mod progress;
 mod query_command;
 mod stuff;
 
-use std::{collections::VecDeque, future::ready, pin::Pin, task};
+use std::future::ready;
 
-use bytes::Bytes;
-use emojis::Emoji;
 use futures::{stream, StreamExt, TryStreamExt};
 use teloxide::{
     adaptors::{DefaultParseMode, Throttle},
@@ -33,15 +31,13 @@ use teloxide::{
     prelude::Requester,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me, Message, Sticker},
 };
-use tokio::io::AsyncRead;
-use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     download::{AlreadyDownloading, Downloader, Task, Tasks},
     error::{callback_query::CallbackQueryError, Error, ResultExt},
     progress::Progress,
     query_command::{ActionDownload, DownloadFormat, DownloadTarget, QueryAction, QueryCommand},
-    stuff::archive,
+    stuff::{archive, chunked_read, sticker_name},
 };
 
 type Bot = AutoSend<DefaultParseMode<Throttle<teloxide::Bot>>>;
@@ -418,52 +414,4 @@ async fn prepare_download_tasks(
         format,
         stickers,
     })
-}
-
-fn sticker_name(idx: Option<u8>, emojis: &str) -> String {
-    let name = emojis
-        .graphemes(true)
-        .flat_map(|cluster| emojis::get(cluster))
-        .map(Emoji::name)
-        .next()
-        .unwrap_or_else(|| /* FIXME: warn */ "malformed_emoji")
-        .replace(' ', "_");
-
-    match idx {
-        Some(idx) => format!("{idx:03}_{name}"),
-        None => name,
-    }
-}
-
-fn chunked_read(bytes: Vec<Bytes>) -> ChunkedRead {
-    ChunkedRead {
-        bytes: bytes.into(),
-    }
-}
-struct ChunkedRead {
-    bytes: VecDeque<Bytes>,
-}
-
-impl AsyncRead for ChunkedRead {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        _cx: &mut task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> task::Poll<std::io::Result<()>> {
-        let ready = task::Poll::Ready(Ok(()));
-
-        let len = match self.bytes.front() {
-            None => return ready,
-            Some(cur) => cur.len(),
-        };
-
-        let bytes = match () {
-            _ if len <= buf.remaining() => self.bytes.pop_front().unwrap(),
-            _ => self.bytes.front_mut().unwrap().split_to(buf.remaining()),
-        };
-
-        buf.put_slice(&bytes);
-
-        ready
-    }
 }
