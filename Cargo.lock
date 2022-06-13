@@ -1261,6 +1261,8 @@ dependencies = [
  "log",
  "pin-project",
  "pretty_env_logger",
+ "serde",
+ "serde_json",
  "teloxide",
  "tokio",
  "unicode-segmentation",

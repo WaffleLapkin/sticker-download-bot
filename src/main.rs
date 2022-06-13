@@ -10,6 +10,7 @@ mod download;
 mod error;
 mod progress;
 mod query_command;
+mod sticker_set_info;
 mod stuff;
 
 use std::future::ready;
@@ -19,8 +20,9 @@ use teloxide::{
     adaptors::{DefaultParseMode, Throttle},
     dispatching::{update_listeners::polling, MessageFilterExt, UpdateHandler},
     dptree::{self, deps},
+    payloads::SendDocumentSetters,
     prelude::{AutoSend, Dispatcher, RequesterExt},
-    types::{CallbackQuery, ChatAction::UploadDocument, InputFile, ParseMode, Update},
+    types::{CallbackQuery, ChatAction::UploadDocument, InputFile, ParseMode, StickerSet, Update},
     utils::command::parse_command,
     RequestError,
 };
@@ -241,7 +243,8 @@ async fn callback_query_download(
     );
 
     let sticker_set_name = sticker.set_name.clone();
-    let tasks = prepare_download_tasks(bot, message.id, sticker, action, &mut progress).await?;
+    let (tasks, set) =
+        prepare_download_tasks(bot, message.id, sticker, action, &mut progress).await?;
     let total_size = tasks.total_size();
     match d.download(tasks) {
         Ok(stream) => {
@@ -281,13 +284,26 @@ async fn callback_query_download(
                             let (name, bytes) = stickers.pop().unwrap();
                             let file = InputFile::read(chunked_read(bytes)).file_name(name); // FIXME: should be something like chunked()
                             bot.send_document(chat_id, file)
+                                .caption(format_caption(set.as_ref()))
                                 .reply_to_message_id(reply_message_id)
                                 .await
                                 .map_err(SendDocumentError)?;
                             bot.delete_message(chat_id, message_id).await.fine();
                         }
-                        Ok(stickers) => {
+                        Ok(mut stickers) => {
                             bot.send_chat_action(chat_id, UploadDocument).await.fine();
+
+                            if let Some(set) = &set {
+                                stickers.push((
+                                    "sticker_info.json".to_owned(),
+                                    vec![bytes::Bytes::from(
+                                        serde_json::to_vec_pretty(
+                                            &sticker_set_info::StickerSetInfo::new(&set, &stickers),
+                                        )
+                                        .unwrap(), // FIXME: unwrap bad
+                                    )],
+                                ));
+                            }
 
                             let zip = archive(
                                 sticker_set_name.as_deref().unwrap_or("stickers"),
@@ -300,6 +316,7 @@ async fn callback_query_download(
                             };
 
                             bot.send_document(chat_id, file)
+                                .caption(format_caption(set.as_ref()))
                                 .reply_to_message_id(reply_message_id)
                                 .await
                                 .map_err(SendDocumentError)?;
@@ -353,13 +370,13 @@ async fn prepare_download_tasks(
     sticker: &Sticker,
     ActionDownload { target, format }: ActionDownload,
     progress: &mut Progress,
-) -> Result<Tasks, Error<CallbackQueryError>> {
+) -> Result<(Tasks, Option<StickerSet>), Error<CallbackQueryError>> {
     let set = match &sticker.set_name {
         Some(name) => Some(bot.get_sticker_set(name).await?),
         None => None,
     };
 
-    let named_and_identified = match (target, set) {
+    let named_and_identified = match (target, set.as_ref()) {
         (DownloadTarget::Single, set) | (DownloadTarget::All, set @ None) => {
             let idx = set.and_then(|set| {
                 set.stickers
@@ -376,12 +393,12 @@ async fn prepare_download_tasks(
         }
         (DownloadTarget::All, Some(set)) => set
             .stickers
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(idx, s)| {
                 (
                     sticker_name(Some(idx as u8), s.emoji.as_deref().unwrap_or_default()),
-                    s.file_id,
+                    s.file_id.clone(),
                 )
             })
             .collect(),
@@ -408,9 +425,22 @@ async fn prepare_download_tasks(
         })
         .await?;
 
-    Ok(Tasks {
+    let tasks = Tasks {
         message_id,
         format,
         stickers,
+    };
+
+    Ok((tasks, set))
+}
+
+fn format_caption(set: Option<&StickerSet>) -> String {
+    set.map(|ss| {
+        use teloxide::utils::html::*;
+
+        let title = bold(&escape(&ss.title));
+        let count = bold(&ss.stickers.len().to_string());
+        format!("Stickers set: {title}\nStickers in set: {count}")
     })
+    .unwrap_or_default()
 }
