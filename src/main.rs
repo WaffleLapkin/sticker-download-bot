@@ -3,7 +3,6 @@
 // - For some reason the bot is slow (need to check why)
 // - Converting to .png is NOT implemented
 // - Messages/interface are very much work in progress
-// - Progress is not shown
 // - The code is quite bad in some places/wip
 // - Sticker pack information is not provided (archive should include .json)
 
