@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use serde::Serialize;
 use teloxide::types::{Sticker, StickerSet};
 
@@ -30,7 +29,7 @@ struct StickerInfo {
 }
 
 impl StickerSetInfo {
-    pub(crate) fn new(set: &StickerSet, stickers: &[(String, Vec<Bytes>)]) -> StickerSetInfo {
+    pub(crate) fn new(set: &StickerSet, stickers: &[(String, Vec<u8>)]) -> StickerSetInfo {
         StickerSetInfo {
             name: set.name.clone(),
             title: set.title.clone(),
@@ -59,7 +58,7 @@ impl StickerSetInfo {
                         width,
                         height,
                         emoji: emoji.clone(),
-                        size_bytes: bytes.iter().map(|b| b.len() as u32).sum(),
+                        size_bytes: bytes.len() as _,
                     },
                 )
                 .collect(),

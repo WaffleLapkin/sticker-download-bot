@@ -37,7 +37,7 @@ use crate::{
     error::{callback_query::CallbackQueryError, Error, ResultExt},
     progress::Progress,
     query_command::{ActionDownload, DownloadFormat, DownloadTarget, QueryAction, QueryCommand},
-    stuff::{archive, chunked_read, sticker_name},
+    stuff::{archive, sticker_name},
 };
 
 type Bot = AutoSend<DefaultParseMode<Throttle<teloxide::Bot>>>;
@@ -264,7 +264,7 @@ async fn callback_query_download(
                         .map(|(file_name, res)| res.map(|v| (file_name, v)))
                         .try_for_each(|file| {
                             // FIXME: show KiB or something
-                            scope.inc_by(file.1.iter().map(|b| b.len() as u64).sum());
+                            scope.inc_by(file.1.len() as _);
                             stickers.push(file);
 
                             ready(Ok(()))
@@ -281,7 +281,7 @@ async fn callback_query_download(
                         Ok(mut stickers) if stickers.len() == 1 => {
                             // FIXME: update progress here
                             let (name, bytes) = stickers.pop().unwrap();
-                            let file = InputFile::read(chunked_read(bytes)).file_name(name); // FIXME: should be something like chunked()
+                            let file = InputFile::memory(bytes).file_name(name); // FIXME: should be something like chunked()
                             bot.send_document(chat_id, file)
                                 .caption(format_caption(set.as_ref()))
                                 .reply_to_message_id(reply_message_id)
@@ -295,12 +295,10 @@ async fn callback_query_download(
                             if let Some(set) = &set {
                                 stickers.push((
                                     "sticker_info.json".to_owned(),
-                                    vec![bytes::Bytes::from(
-                                        serde_json::to_vec_pretty(
-                                            &sticker_set_info::StickerSetInfo::new(&set, &stickers),
-                                        )
-                                        .unwrap(), // FIXME: unwrap bad
-                                    )],
+                                    serde_json::to_vec_pretty(
+                                        &sticker_set_info::StickerSetInfo::new(&set, &stickers),
+                                    )
+                                    .unwrap(), // FIXME: unwrap bad
                                 ));
                             }
 

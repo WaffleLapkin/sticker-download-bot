@@ -5,8 +5,7 @@ use std::{
     task::Poll,
 };
 
-use bytes::Bytes;
-use futures::{stream, Stream, StreamExt, TryStreamExt};
+use futures::{stream, Stream, StreamExt};
 use teloxide::net::Download;
 
 use crate::query_command::DownloadFormat;
@@ -33,7 +32,7 @@ pub struct Task {
 
 type Item = (
     String,
-    Result<Vec<Bytes>, <crate::Bot as Download<'static>>::StreamErr>,
+    Result<Vec<u8>, <crate::Bot as Download<'static>>::Err>,
 );
 
 impl Downloader {
@@ -56,16 +55,21 @@ impl Downloader {
         let Self { bot, in_flight } = self.clone();
 
         let stream = stream::iter(t.stickers)
-            .map(move |Task { path, name, .. }| {
-                let bot = bot.clone();
-                async move {
-                    let file_name = format!("{name}.{ext}", ext = format.ext());
-                    let bytes: Result<Vec<_>, _> =
-                        bot.download_file_stream(&path).try_collect().await;
+            .map(
+                move |Task {
+                          path, name, size, ..
+                      }| {
+                    let bot = bot.clone();
+                    async move {
+                        let file_name = format!("{name}.{ext}", ext = format.ext());
 
-                    (file_name, bytes)
-                }
-            })
+                        let mut bytes = Vec::with_capacity(size);
+                        let bytes = bot.download_file(&path, &mut bytes).await.map(|()| bytes);
+
+                        (file_name, bytes)
+                    }
+                },
+            )
             .buffer_unordered(C);
 
         let stream = defer_stream(stream, move || {
