@@ -49,7 +49,6 @@ impl Downloader {
             return Err(AlreadyDownloading);
         }
 
-        assert_eq!(t.format, DownloadFormat::Webp);
         let format = t.format;
 
         let Self { bot, in_flight } = self.clone();

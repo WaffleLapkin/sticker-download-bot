@@ -1,9 +1,11 @@
 // Status:
 // - Basic functionality (downloading sticker packs) works!
+// - Converting to .png is implemented, but
+//   - Is not rate limited (it's quite easy to DDOS the bot)
 // - For some reason the bot is slow (need to check why)
-// - Converting to .png is NOT implemented
 // - Messages/interface are very much work in progress
 // - The code is quite bad in some places/wip
+// - Zips do not have thumbnails
 
 mod download;
 mod error;
@@ -15,6 +17,7 @@ mod stuff;
 use std::future::ready;
 
 use futures::{stream, StreamExt, TryStreamExt};
+use lodepng::RGBA;
 use teloxide::{
     adaptors::{DefaultParseMode, Throttle},
     dispatching::{update_listeners::polling, MessageFilterExt, UpdateHandler},
@@ -260,7 +263,7 @@ async fn callback_query_download(
                     let mut scope = progress.scope("Downloading stickers", total_size as _);
 
                     let mut stickers = Vec::new();
-                    let res = stream
+                    let mut res = stream
                         .map(|(file_name, res)| res.map(|v| (file_name, v)))
                         .try_for_each(|file| {
                             // FIXME: show KiB or something
@@ -272,9 +275,40 @@ async fn callback_query_download(
                         .await
                         .map(|()| stickers);
 
-                    if res.is_ok() {
+                    if let Ok(mut stickers) = res {
+                        match action.format {
+                            DownloadFormat::Png => {
+                                let a = tokio::task::spawn_blocking(|| {
+                                    let mut scope = progress
+                                        .scope("Converting stickers to .png", stickers.len() as _);
+
+                                    for (_file_name, bytes) in &mut stickers {
+                                        let (w, h, raw) = libwebp::WebPDecodeRGBA(bytes).unwrap();
+
+                                        *bytes = lodepng::encode32(
+                                            bytemuck::cast_slice::<u8, RGBA>(&*raw),
+                                            w as _,
+                                            h as _,
+                                        )
+                                        .unwrap();
+
+                                        scope.inc();
+                                    }
+
+                                    (progress, stickers)
+                                })
+                                .await
+                                .unwrap();
+
+                                progress = a.0;
+                                stickers = a.1;
+                            } // FIXME: not fine
+                            DownloadFormat::Webp => {}
+                        }
+
                         // FIXME: fix the message when downloading a single sticker
                         progress.title_imp("Uploading sticker set");
+                        res = Ok(stickers);
                     }
 
                     match res {
