@@ -16,8 +16,13 @@ impl<E> From<RequestError> for Error<E> {
 pub mod callback_query {
     use std::fmt;
 
+    use teloxide::DownloadError;
+
     use crate::{
-        error::{downloading::AlreadyDownloading, Error},
+        error::{
+            downloading::{AlreadyDownloading, SendDocumentError},
+            Error,
+        },
         query_command::DownloadTarget,
     };
 
@@ -29,6 +34,25 @@ pub mod callback_query {
         AnimatedStickerNotSupported,
         VideoStickerNotSupported,
         AlreadyDownloading(AlreadyDownloading),
+
+        // post errors
+        Download(DownloadError),
+        SendDocument(SendDocumentError),
+    }
+
+    impl CallbackQueryError {
+        pub fn is_post(&self) -> bool {
+            match self {
+                CallbackQueryError::InvalidButtonData { .. }
+                | CallbackQueryError::NoMessage
+                | CallbackQueryError::EmptyReply
+                | CallbackQueryError::ReplyIsNotSticker
+                | CallbackQueryError::AnimatedStickerNotSupported
+                | CallbackQueryError::VideoStickerNotSupported
+                | CallbackQueryError::AlreadyDownloading(_) => false,
+                CallbackQueryError::Download(_) | CallbackQueryError::SendDocument(_) => true,
+            }
+        }
     }
 
     impl fmt::Display for CallbackQueryError {
@@ -54,6 +78,13 @@ pub mod callback_query {
 
                     write!(f, "This {what} is already being downloaded")
                 }
+                CallbackQueryError::Download(err) => {
+                    // FIXME: determine (s)
+                    write!(f, "An error happened while downloading sticker(s): <code>{err}</code> :(\n\nTry again later.")
+                }
+                CallbackQueryError::SendDocument(SendDocumentError(e)) => {
+                    write!(f, "Couldn't send the document: {e}.\n Try again later.")
+                }
             }
         }
     }
@@ -61,6 +92,16 @@ pub mod callback_query {
     impl From<AlreadyDownloading> for Error<CallbackQueryError> {
         fn from(ad: AlreadyDownloading) -> Self {
             Error::Show(CallbackQueryError::AlreadyDownloading(ad))
+        }
+    }
+    impl From<DownloadError> for Error<CallbackQueryError> {
+        fn from(d: DownloadError) -> Self {
+            Error::Show(CallbackQueryError::Download(d))
+        }
+    }
+    impl From<SendDocumentError> for Error<CallbackQueryError> {
+        fn from(sd: SendDocumentError) -> Self {
+            Error::Show(CallbackQueryError::SendDocument(sd))
         }
     }
 
