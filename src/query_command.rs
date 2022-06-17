@@ -172,6 +172,10 @@ impl DownloadFormat {
             DownloadFormat::Webp => "webp",
         }
     }
+
+    pub fn is_fine_for_sending_alone(&self) -> bool {
+        !matches!(self, Self::Webp)
+    }
 }
 
 struct Decoder<'a>(&'a str);

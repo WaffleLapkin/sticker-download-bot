@@ -297,19 +297,12 @@ async fn callback_query_download(
     // FIXME: fix the message when downloading a single sticker
     progress.title_imp("Uploading sticker set");
 
-    if stickers.len() == 1 {
-        // FIXME: update progress here
-        let (name, bytes) = stickers.pop().unwrap();
-        let file = InputFile::memory(bytes).file_name(name); // FIXME: should be something like chunked()
-        bot.send_document(chat_id, file)
-            .caption(format_caption(set.as_ref()))
-            .reply_to_message_id(reply_message_id)
-            .await
-            .map_err(SendDocumentError)?;
-        bot.delete_message(chat_id, message_id).await.fine();
-    } else {
-        bot.send_chat_action(chat_id, UploadDocument).await.fine();
+    bot.send_chat_action(chat_id, UploadDocument).await.fine();
 
+    let file = if stickers.len() == 1 && action.format.is_fine_for_sending_alone() {
+        let (name, bytes) = stickers.pop().unwrap();
+        InputFile::memory(bytes).file_name(name)
+    } else {
         if let Some(set) = &set {
             stickers.push((
                 "sticker_info.json".to_owned(),
@@ -325,13 +318,16 @@ async fn callback_query_download(
             _ => return Ok(()), // FIXME
         };
 
-        bot.send_document(chat_id, file)
-            .caption(format_caption(set.as_ref()))
-            .reply_to_message_id(reply_message_id)
-            .await
-            .map_err(SendDocumentError)?;
-        bot.delete_message(chat_id, message_id).await.fine();
-    }
+        file
+    };
+
+    bot.send_document(chat_id, file)
+        .caption(format_caption(set.as_ref()))
+        .reply_to_message_id(reply_message_id)
+        .await
+        .map_err(SendDocumentError)?;
+
+    bot.delete_message(chat_id, message_id).await.fine();
 
     Ok(())
 }
