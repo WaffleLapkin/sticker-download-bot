@@ -8,15 +8,16 @@ use std::{
 use futures::{stream, Stream, StreamExt};
 use teloxide::net::Download;
 
-use crate::query_command::DownloadFormat;
+use crate::{
+    error::downloading::AlreadyDownloading,
+    query_command::{DownloadFormat, DownloadTarget},
+};
 
 #[derive(Clone)]
 pub struct Downloader {
     bot: crate::Bot,
     in_flight: Arc<Mutex<HashSet<i32>>>,
 }
-
-pub struct AlreadyDownloading;
 
 pub struct Tasks {
     pub message_id: i32,
@@ -44,9 +45,13 @@ impl Downloader {
     }
 
     // TODO: progress
-    pub fn download(&self, t: Tasks) -> Result<impl Stream<Item = Item>, AlreadyDownloading> {
+    pub fn download(
+        &self,
+        t: Tasks,
+        target: DownloadTarget,
+    ) -> Result<impl Stream<Item = Item>, AlreadyDownloading> {
         if !self.in_flight.lock().unwrap().insert(t.message_id) {
-            return Err(AlreadyDownloading);
+            return Err(AlreadyDownloading(target));
         }
 
         let format = t.format;

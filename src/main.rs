@@ -36,7 +36,7 @@ use teloxide::{
 };
 
 use crate::{
-    download::{AlreadyDownloading, Downloader, Task, Tasks},
+    download::{Downloader, Task, Tasks},
     error::{callback_query::CallbackQueryError, Error, ResultExt},
     progress::Progress,
     query_command::{ActionDownload, DownloadFormat, DownloadTarget, QueryAction, QueryCommand},
@@ -217,24 +217,16 @@ async fn callback_query_download(
 ) -> Result<(), Error<CallbackQueryError>> {
     use error::callback_query as err;
 
-    let message = match &query.message {
-        Some(m) => m,
-        None => return err::no_message(),
-    };
+    let message = query.message.as_ref().ok_or_else(err::no_message)?;
+    let reply = message.reply_to_message().ok_or_else(err::empty_reply)?;
 
-    let reply = match message.reply_to_message() {
-        Some(r) => r,
-        None => return err::empty_reply(),
-    };
-
-    let sticker = match reply.sticker() {
+    let sticker = match reply.sticker().ok_or_else(err::reply_is_not_sticker)? {
         // FIXME: ideally we would simply either
         //        A) support animated/video stickers
         //        B) answer w/ error when the sticker is sent, not when the button is pressed
-        Some(s) if s.is_animated => return err::animated_sticker_not_supported(),
-        Some(s) if s.is_video => return err::video_sticker_not_supported(),
-        None => return err::reply_is_not_sticker(),
-        Some(s) => s,
+        s if s.is_animated => return err::animated_sticker_not_supported(),
+        s if s.is_video => return err::video_sticker_not_supported(),
+        s => s,
     };
 
     let mut progress = Progress::new(
@@ -248,149 +240,132 @@ async fn callback_query_download(
     let (tasks, set) =
         prepare_download_tasks(bot, message.id, sticker, action, &mut progress).await?;
     let total_size = tasks.total_size();
-    match d.download(tasks) {
-        Ok(stream) => {
-            bot.answer_callback_query(&query.id).await?;
 
-            let bot = bot.clone();
-            let chat_id = message.chat.id;
-            let message_id = message.id;
-            let reply_message_id = reply.id;
-            tokio::spawn(async move {
-                use error::downloading::SendDocumentError;
+    let stream = d.download(tasks, action.target)?;
 
-                let fut = async {
-                    let mut scope = progress.scope("Downloading stickers", total_size as _);
+    bot.answer_callback_query(&query.id).await?;
 
-                    let mut stickers = Vec::new();
-                    let mut res = stream
-                        .map(|(file_name, res)| res.map(|v| (file_name, v)))
-                        .try_for_each(|file| {
-                            // FIXME: show KiB or something
-                            scope.inc_by(file.1.len() as _);
-                            stickers.push(file);
+    let bot = bot.clone();
+    let chat_id = message.chat.id;
+    let message_id = message.id;
+    let reply_message_id = reply.id;
+    tokio::spawn(async move {
+        use error::downloading::SendDocumentError;
 
-                            ready(Ok(()))
-                        })
-                        .await
-                        .map(|()| stickers);
+        let fut = async {
+            let mut scope = progress.scope("Downloading stickers", total_size as _);
 
-                    if let Ok(mut stickers) = res {
-                        match action.format {
-                            DownloadFormat::Png => {
-                                let a = tokio::task::spawn_blocking(|| {
-                                    let mut scope = progress
-                                        .scope("Converting stickers to .png", stickers.len() as _);
+            let mut stickers = Vec::new();
+            let mut res = stream
+                .map(|(file_name, res)| res.map(|v| (file_name, v)))
+                .try_for_each(|file| {
+                    // FIXME: show KiB or something
+                    scope.inc_by(file.1.len() as _);
+                    stickers.push(file);
 
-                                    for (_file_name, bytes) in &mut stickers {
-                                        let (w, h, raw) = libwebp::WebPDecodeRGBA(bytes).unwrap();
+                    ready(Ok(()))
+                })
+                .await
+                .map(|()| stickers);
 
-                                        *bytes = lodepng::encode32(
-                                            bytemuck::cast_slice::<u8, RGBA>(&*raw),
-                                            w as _,
-                                            h as _,
-                                        )
-                                        .unwrap();
+            if let Ok(mut stickers) = res {
+                match action.format {
+                    DownloadFormat::Png => {
+                        let a = tokio::task::spawn_blocking(|| {
+                            let mut scope =
+                                progress.scope("Converting stickers to .png", stickers.len() as _);
 
-                                        scope.inc();
-                                    }
+                            for (_file_name, bytes) in &mut stickers {
+                                let (w, h, raw) = libwebp::WebPDecodeRGBA(bytes).unwrap();
 
-                                    (progress, stickers)
-                                })
-                                .await
+                                *bytes = lodepng::encode32(
+                                    bytemuck::cast_slice::<u8, RGBA>(&*raw),
+                                    w as _,
+                                    h as _,
+                                )
                                 .unwrap();
 
-                                progress = a.0;
-                                stickers = a.1;
-                            } // FIXME: not fine
-                            DownloadFormat::Webp => {}
-                        }
-
-                        // FIXME: fix the message when downloading a single sticker
-                        progress.title_imp("Uploading sticker set");
-                        res = Ok(stickers);
-                    }
-
-                    match res {
-                        Ok(mut stickers) if stickers.len() == 1 => {
-                            // FIXME: update progress here
-                            let (name, bytes) = stickers.pop().unwrap();
-                            let file = InputFile::memory(bytes).file_name(name); // FIXME: should be something like chunked()
-                            bot.send_document(chat_id, file)
-                                .caption(format_caption(set.as_ref()))
-                                .reply_to_message_id(reply_message_id)
-                                .await
-                                .map_err(SendDocumentError)?;
-                            bot.delete_message(chat_id, message_id).await.fine();
-                        }
-                        Ok(mut stickers) => {
-                            bot.send_chat_action(chat_id, UploadDocument).await.fine();
-
-                            if let Some(set) = &set {
-                                stickers.push((
-                                    "sticker_info.json".to_owned(),
-                                    serde_json::to_vec_pretty(
-                                        &sticker_set_info::StickerSetInfo::new(&set, &stickers),
-                                    )
-                                    .unwrap(), // FIXME: unwrap bad
-                                ));
+                                scope.inc();
                             }
 
-                            let zip = archive(
-                                sticker_set_name.as_deref().unwrap_or("stickers"),
-                                stickers,
-                            );
+                            (progress, stickers)
+                        })
+                        .await
+                        .unwrap();
 
-                            let file = match zip {
-                                Ok(z) => z,
-                                _ => return Ok(()), // FIXME
-                            };
-
-                            bot.send_document(chat_id, file)
-                                .caption(format_caption(set.as_ref()))
-                                .reply_to_message_id(reply_message_id)
-                                .await
-                                .map_err(SendDocumentError)?;
-                            bot.delete_message(chat_id, message_id).await.fine();
-                        }
-                        Err(err) => {
-                            let text = format!("An error happened while downloading sticker(s): <code>{err}</code> :(\n\nTry again later."); // FIXME: determine (s)
-
-                            // FIXME: use `progress`
-                            bot.edit_message_text(chat_id, message_id, text)
-                                .await
-                                .fine();
-                        }
-                    }
-
-                    Ok(())
-                };
-                match fut.await {
-                    Ok(()) => {}
-                    Err(SendDocumentError(e)) => {
-                        let text =
-                            format!("Error: Couldn't send the document: {e}.\n Try again later.");
-
-                        bot.edit_message_text(chat_id, message_id, text)
-                            .await
-                            .fine()
-                    }
+                        progress = a.0;
+                        stickers = a.1;
+                    } // FIXME: not fine
+                    DownloadFormat::Webp => {}
                 }
-            });
-        }
 
-        // FIXME use ? or smh
-        Err(AlreadyDownloading) => {
-            let what = match action.target {
-                DownloadTarget::Single => "sticker",
-                DownloadTarget::All => "set",
-            };
+                // FIXME: fix the message when downloading a single sticker
+                progress.title_imp("Uploading sticker set");
+                res = Ok(stickers);
+            }
 
-            bot.answer_callback_query(&query.id)
-                .text(format!("Error: This {what} is already downloading"))
-                .await?;
+            match res {
+                Ok(mut stickers) if stickers.len() == 1 => {
+                    // FIXME: update progress here
+                    let (name, bytes) = stickers.pop().unwrap();
+                    let file = InputFile::memory(bytes).file_name(name); // FIXME: should be something like chunked()
+                    bot.send_document(chat_id, file)
+                        .caption(format_caption(set.as_ref()))
+                        .reply_to_message_id(reply_message_id)
+                        .await
+                        .map_err(SendDocumentError)?;
+                    bot.delete_message(chat_id, message_id).await.fine();
+                }
+                Ok(mut stickers) => {
+                    bot.send_chat_action(chat_id, UploadDocument).await.fine();
+
+                    if let Some(set) = &set {
+                        stickers.push((
+                            "sticker_info.json".to_owned(),
+                            serde_json::to_vec_pretty(&sticker_set_info::StickerSetInfo::new(
+                                &set, &stickers,
+                            ))
+                            .unwrap(), // FIXME: unwrap bad
+                        ));
+                    }
+
+                    let zip = archive(sticker_set_name.as_deref().unwrap_or("stickers"), stickers);
+
+                    let file = match zip {
+                        Ok(z) => z,
+                        _ => return Ok(()), // FIXME
+                    };
+
+                    bot.send_document(chat_id, file)
+                        .caption(format_caption(set.as_ref()))
+                        .reply_to_message_id(reply_message_id)
+                        .await
+                        .map_err(SendDocumentError)?;
+                    bot.delete_message(chat_id, message_id).await.fine();
+                }
+                Err(err) => {
+                    let text = format!("An error happened while downloading sticker(s): <code>{err}</code> :(\n\nTry again later."); // FIXME: determine (s)
+
+                    // FIXME: use `progress`
+                    bot.edit_message_text(chat_id, message_id, text)
+                        .await
+                        .fine();
+                }
+            }
+
+            Ok(())
+        };
+        match fut.await {
+            Ok(()) => {}
+            Err(SendDocumentError(e)) => {
+                let text = format!("Error: Couldn't send the document: {e}.\n Try again later.");
+
+                bot.edit_message_text(chat_id, message_id, text)
+                    .await
+                    .fine()
+            }
         }
-    };
+    });
 
     Ok(())
 }
