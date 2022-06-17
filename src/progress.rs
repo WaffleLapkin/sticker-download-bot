@@ -33,6 +33,7 @@ impl Progress {
             p: self,
             total,
             done: 0,
+            unit: Dimensionless,
         }
     }
 
@@ -88,20 +89,34 @@ impl Progress {
     }
 }
 
-pub struct ProgressScope<'p> {
+pub struct ProgressScope<'p, U = Dimensionless> {
     p: &'p mut Progress,
     total: u64,
     done: u64,
+    unit: U,
 }
 
-impl ProgressScope<'_> {
+impl<'p, U: Unit> ProgressScope<'p, U> {
+    pub fn with_unit<U2>(self, unit: U2) -> ProgressScope<'p, U2> {
+        ProgressScope {
+            p: self.p,
+            total: self.total,
+            done: self.done,
+            unit,
+        }
+    }
+
     pub fn inc(&mut self) {
         self.inc_by(1)
     }
 
     pub fn inc_by(&mut self, by: u64) {
+        let prev = self.done;
         self.done += by;
-        self.do_update()
+
+        if self.unit.is_significant_change(prev, self.done) {
+            self.do_update()
+        }
     }
 
     fn do_update(&mut self) {
@@ -109,11 +124,55 @@ impl ProgressScope<'_> {
             total,
             done,
             p: Progress { ref title, .. },
+            ref unit,
         } = self;
 
+        let done = unit.apply(done);
+        let total = unit.apply(total);
+        let postfix = unit.postfix_with_leading_space();
+
         let percent = done * 100 / total;
-        let message = format!("{title} {percent}% ({done}/{total})");
+        let message = format!("{title} {percent}% ({done}/{total}{postfix})");
 
         self.p.do_update(message)
+    }
+}
+
+pub trait Unit {
+    fn apply(&self, x: u64) -> u64;
+
+    fn postfix_with_leading_space(&self) -> &str;
+
+    fn is_significant_change(&self, prev: u64, next: u64) -> bool;
+}
+
+pub struct Dimensionless;
+
+impl Unit for Dimensionless {
+    fn apply(&self, x: u64) -> u64 {
+        x
+    }
+
+    fn postfix_with_leading_space(&self) -> &str {
+        ""
+    }
+
+    fn is_significant_change(&self, prev: u64, next: u64) -> bool {
+        prev < next
+    }
+}
+
+pub struct KiB;
+
+impl Unit for KiB {
+    fn apply(&self, x: u64) -> u64 {
+        x / 1024
+    }
+
+    fn postfix_with_leading_space(&self) -> &str {
+        " KiB"
+    }
+    fn is_significant_change(&self, prev: u64, next: u64) -> bool {
+        prev / 1024 < next / 1024
     }
 }

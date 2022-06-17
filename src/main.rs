@@ -38,7 +38,7 @@ use teloxide::{
 use crate::{
     download::{Downloader, Task, Tasks},
     error::{callback_query::CallbackQueryError, Error, ResultExt},
-    progress::Progress,
+    progress::{KiB, Progress},
     query_command::{ActionDownload, DownloadFormat, DownloadTarget, QueryAction, QueryCommand},
     stuff::{archive, sticker_name},
 };
@@ -73,7 +73,7 @@ fn main() {
         .distribution_function(|_| None::<()>)
         .dependencies(deps![Downloader::new(bot.clone())])
         .build();
-    dp.setup_ctrlc_handler(); 
+    dp.setup_ctrlc_handler();
 
     if test {
         let listener = polling(bot, Some(std::time::Duration::from_secs(1)), None, None);
@@ -249,13 +249,14 @@ async fn callback_query_download(
     use error::downloading::SendDocumentError;
 
     let fut = async {
-        let mut scope = progress.scope("Downloading stickers", total_size as _);
+        let mut scope = progress
+            .scope("Downloading stickers", total_size as _)
+            .with_unit(KiB);
 
         let mut stickers = Vec::new();
         let mut res = stream
             .map(|(file_name, res)| res.map(|v| (file_name, v)))
             .try_for_each(|file| {
-                // FIXME: show KiB or something
                 scope.inc_by(file.1.len() as _);
                 stickers.push(file);
 
