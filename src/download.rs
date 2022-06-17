@@ -74,7 +74,7 @@ impl Downloader {
                     }
                 },
             )
-            .buffer_unordered(C);
+            .buffered(C);
 
         let stream = defer_stream(stream, move || {
             in_flight.lock().unwrap().remove(&t.message_id);

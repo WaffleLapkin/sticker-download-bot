@@ -387,7 +387,7 @@ async fn prepare_download_tasks(
                 size: f.file_size as usize,
             })
         })
-        .buffer_unordered(16 /* FIXME: choose constant */)
+        .buffered(16 /* FIXME: choose constant */)
         //.try_collect()
         .try_for_each(|task| {
             stickers.push(task);
