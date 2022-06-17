@@ -81,12 +81,12 @@ pub mod callback_query {
         Error::Show(CallbackQueryError::ReplyIsNotSticker)
     }
 
-    pub fn animated_sticker_not_supported() -> Result<(), Error<CallbackQueryError>> {
-        Err(Error::Show(CallbackQueryError::AnimatedStickerNotSupported))
+    pub fn animated_sticker_not_supported() -> Error<CallbackQueryError> {
+        Error::Show(CallbackQueryError::AnimatedStickerNotSupported)
     }
 
-    pub fn video_sticker_not_supported() -> Result<(), Error<CallbackQueryError>> {
-        Err(Error::Show(CallbackQueryError::VideoStickerNotSupported))
+    pub fn video_sticker_not_supported() -> Error<CallbackQueryError> {
+        Error::Show(CallbackQueryError::VideoStickerNotSupported)
     }
 }
 

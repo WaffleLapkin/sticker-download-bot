@@ -219,15 +219,10 @@ async fn callback_query_download(
 
     let message = query.message.as_ref().ok_or_else(err::no_message)?;
     let reply = message.reply_to_message().ok_or_else(err::empty_reply)?;
-
-    let sticker = match reply.sticker().ok_or_else(err::reply_is_not_sticker)? {
-        // FIXME: ideally we would simply either
-        //        A) support animated/video stickers
-        //        B) answer w/ error when the sticker is sent, not when the button is pressed
-        s if s.is_animated => return err::animated_sticker_not_supported(),
-        s if s.is_video => return err::video_sticker_not_supported(),
-        s => s,
-    };
+    let sticker = reply
+        .sticker()
+        .ok_or_else(err::reply_is_not_sticker)
+        .and_then(check_supported_sticker)?;
 
     let mut progress = Progress::new(
         &bot,
@@ -438,6 +433,19 @@ async fn prepare_download_tasks(
     };
 
     Ok((tasks, set))
+}
+
+fn check_supported_sticker(sticker: &Sticker) -> Result<&Sticker, Error<CallbackQueryError>> {
+    use error::callback_query as err;
+
+    match sticker {
+        // FIXME: ideally we would simply either
+        //        A) support animated/video stickers
+        //        B) answer w/ error when the sticker is sent, not when the button is pressed
+        s if s.is_animated => Err(err::animated_sticker_not_supported()),
+        s if s.is_video => Err(err::video_sticker_not_supported()),
+        s => Ok(s),
+    }
 }
 
 fn format_caption(set: Option<&StickerSet>) -> String {
