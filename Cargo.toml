@@ -22,6 +22,8 @@ uuid = { version = "1.0", features = ["v4"] }
 unicode-segmentation = "1.9"
 emojis = "0.4.0"
 
+bytemuck = "1.9.1"
 libwebp = "0.1.2"
 lodepng = "3.6.2"
-bytemuck = "1.9.1"
+jpeg-encoder = "0.5.1"
+fast_image_resize = "0.9.3"

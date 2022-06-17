@@ -1,14 +1,15 @@
 // Status:
 // - Basic functionality (downloading sticker packs) works!
+// - Zips do have thumbnails
 // - Converting to .png is implemented, but
 //   - Is not rate limited (it's quite easy to DDOS the bot)
 // - For some reason the bot is slow (need to check why)
 // - Messages/interface are very much work in progress
 // - The code is quite bad in some places/wip
-// - Zips do not have thumbnails
 
 mod download;
 mod error;
+mod preview;
 mod progress;
 mod query_command;
 mod sticker_set_info;
@@ -268,6 +269,8 @@ async fn callback_query_download(
         .try_collect()
         .await?;
 
+    let thumbnail = preview::generate_thumbnail(&stickers[0].1);
+
     match action.format {
         DownloadFormat::Png => {
             let a = tokio::task::spawn_blocking(|| {
@@ -323,6 +326,7 @@ async fn callback_query_download(
 
     bot.send_document(chat_id, file)
         .caption(format_caption(set.as_ref()))
+        .thumb(thumbnail)
         .reply_to_message_id(reply_message_id)
         .await
         .map_err(SendDocumentError)?;
