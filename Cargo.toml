@@ -11,7 +11,7 @@ zip = "0.6.2"
 bytes = "1.1"
 tokio = { version = "1.18", features = ["rt"] }
 futures = "0.3.21"
-teloxide = {version = "0.9.0", features = ["throttle"] }
+teloxide = {version = "0.10.1", features = ["throttle"] }
 pretty_env_logger = "0.4.0"
 pin-project = "1.0"
 serde = { version = "1.0.130", features = ["derive"] }
@@ -26,4 +26,4 @@ bytemuck = "1.9.1"
 libwebp = "0.1.2"
 lodepng = "3.6.2"
 jpeg-encoder = "0.5.1"
-fast_image_resize = "0.9.3"
+fast_image_resize = "1.0.0"

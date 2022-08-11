@@ -21,7 +21,7 @@ use futures::{stream, StreamExt, TryStreamExt};
 use lodepng::RGBA;
 use teloxide::{
     adaptors::{DefaultParseMode, Throttle},
-    dispatching::{update_listeners::polling, MessageFilterExt, UpdateHandler},
+    dispatching::{update_listeners::Polling, MessageFilterExt, UpdateHandler},
     dptree::{self, deps},
     payloads::SendDocumentSetters,
     prelude::{AutoSend, Dispatcher, RequesterExt},
@@ -73,11 +73,13 @@ fn main() {
     let mut dp = Dispatcher::builder(bot.clone(), dispatch_tree())
         .distribution_function(|_| None::<()>)
         .dependencies(deps![Downloader::new(bot.clone())])
+        .enable_ctrlc_handler()
         .build();
-    dp.setup_ctrlc_handler();
 
     if test {
-        let listener = polling(bot, Some(std::time::Duration::from_secs(1)), None, None);
+        let listener = Polling::builder(bot)
+            .timeout(std::time::Duration::from_secs(1))
+            .build();
 
         rt.block_on(async {
             dp.dispatch_with_listener(
@@ -382,9 +384,9 @@ async fn prepare_download_tasks(
     stream::iter(named_and_identified)
         .map(|(name, file_id)| async {
             bot.get_file(file_id).await.map(|f| Task {
+                size: f.file_size as usize,
                 path: f.file_path,
                 name,
-                size: f.file_size as usize,
             })
         })
         .buffered(16 /* FIXME: choose constant */)
@@ -408,14 +410,15 @@ async fn prepare_download_tasks(
 
 fn check_supported_sticker(sticker: &Sticker) -> Result<&Sticker, Error<CallbackQueryError>> {
     use error::callback_query as err;
+    use teloxide::types::StickerKind::*;
 
-    match sticker {
+    match sticker.kind {
         // FIXME: ideally we would simply either
         //        A) support animated/video stickers
         //        B) answer w/ error when the sticker is sent, not when the button is pressed
-        s if s.is_animated => Err(err::animated_sticker_not_supported()),
-        s if s.is_video => Err(err::video_sticker_not_supported()),
-        s => Ok(s),
+        Animated => Err(err::animated_sticker_not_supported()),
+        Video => Err(err::video_sticker_not_supported()),
+        Webp => Ok(sticker),
     }
 }
 

@@ -33,7 +33,7 @@ impl StickerSetInfo {
         StickerSetInfo {
             name: set.name.clone(),
             title: set.title.clone(),
-            kind: match (set.is_animated, set.is_video) {
+            kind: match (set.is_animated(), set.is_video()) {
                 (true, _) => StickerSetKind::Animated,
                 (_, true) => StickerSetKind::Video,
                 (_, _) => StickerSetKind::Common,
